@@ -1,4 +1,11 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <libgen.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -15,9 +22,18 @@ bool do_system(const char *cmd)
  *  Call the system() function with the command set in the cmd
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
-*/
+*/  
+    int isSuccess = system(cmd);
 
-    return true;
+    if(isSuccess < 0)
+    {
+        perror("System call error: ");
+        return false;
+    }
+    else
+    {
+        return true;
+    };
 }
 
 /**
@@ -58,10 +74,55 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
-
     va_end(args);
+   
+    int status;
 
-    return true;
+    pid_t pidId = fork();
+
+    if (pidId < 0) {
+        perror("fork");
+        return false;
+    }
+
+    if (pidId == 0) {
+        /* Child process */
+        execv(command[0], command);
+
+        printf("\nChild process:\n");
+
+        /* execv returns ONLY on failure */
+        perror("child execv");
+        _exit(EXIT_FAILURE);
+    } else {
+        printf("\nParent process\n");
+        
+        /* Parent process */
+        pid_t w = waitpid(pidId, &status, 0);
+
+        if (w < 0) {
+            perror("waitpid");
+            return false;
+        }
+
+        if (WIFEXITED(status)) {
+            printf("Child exited with code %d\n",
+                   WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("Child killed by signal %d\n",
+                   WTERMSIG(status));
+        }
+
+        if(WEXITSTATUS(status) == 1)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    printf("\nExit function: %s\n", __func__);
+    return false;
 }
 
 /**
@@ -92,7 +153,53 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int pidId;
 
+    // open file
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    
+    // check for the errors
+    if (fd < 0) { perror("open"); abort(); }
+     
+    // call fork command: -1 for error, 0 for child process and > 0 for parent 
+    switch (pidId = fork()) {
+    case -1: perror("fork"); abort();
+    case 0:
+        printf("\n%s: This is child process\n", __func__);
+        if (dup2(fd, 1) < 0) { perror("dup2"); abort(); }
+        close(fd);
+        
+        execv(command[0], command); perror("execvp"); abort();
+    default:
+        printf("\n%s: This is parent process.\n", __func__);
+        int status;
+        pid_t w = waitpid(pidId, &status, 0);
+
+        if (w < 0) {
+            perror("waitpid");
+            return false;
+        }
+
+        if (WIFEXITED(status)) {
+            printf("Child exited with code %d\n",
+                   WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("Child killed by signal %d\n",
+                   WTERMSIG(status));
+        }
+
+        close(fd);
+
+        if(WEXITSTATUS(status) == 1)
+        {
+            return false;
+        }
+
+        return true;
+        
+        //do whatever the parent wants to do.
+    }
+    
     va_end(args);
 
     return true;
